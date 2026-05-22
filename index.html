@@ -775,6 +775,11 @@ textarea:focus { border-color: var(--border2); }
 .study-target-fill { height:5px; background:var(--green); border-radius:3px; transition:width 0.4s ease; }
 .study-target-lbl { font-size:10px; color:var(--hint); margin-top:3px; display:flex; justify-content:space-between; }
 
+.pomo-mode-toggle { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 7px; transition: all 0.15s; }
+.pomo-mode-toggle:hover { color: var(--text); border-color: var(--border2); }
+.sw-display { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; color: var(--text); }
+.sw-lap-item { font-size: 10px; color: var(--hint); text-align: center; padding: 1px 0; font-variant-numeric: tabular-nums; }
+
 /* ── SAVE BADGE ── */
 #saveBadge {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -1002,10 +1007,12 @@ textarea:focus { border-color: var(--border2); }
               <!-- Pomodoro sub-tile -->
               <div class="glance-tile pomo-sub-tile">
                 <div class="pomo-header-row">
-                  <span class="tile-label">⏱ Focus</span>
+                  <span class="tile-label">⏱ <span id="timerModeLabel">Focus</span></span>
                   <span class="pomo-session-count" id="pomoSessionCount"></span>
+                  <button class="pomo-mode-toggle" id="timerModeToggle" onclick="toggleTimerMode()" title="Switch mode">⇄</button>
                 </div>
-                <div class="pomo-centre-zone">
+                <!-- Pomodoro view -->
+                <div class="pomo-centre-zone" id="pomoView">
                   <div class="pomo-ring-wrap" style="width:100px;height:100px;">
                     <svg class="pomo-ring" viewBox="0 0 64 64" style="width:100px;height:100px;">
                       <circle class="pomo-ring-bg" cx="32" cy="32" r="28"/>
@@ -1017,13 +1024,26 @@ textarea:focus { border-color: var(--border2); }
                   <div class="pomo-mode-lbl" id="pomoModeLbl">Focus</div>
                   <div class="pomo-btns">
                     <button class="pomo-btn pomo-start" id="pomoStartBtn" onclick="pomoToggle()">▶</button>
+                    <button class="pomo-btn" id="pomoSkipBtn" onclick="pomoSkip()" title="Skip break" style="display:none;">⏭</button>
                     <button class="pomo-btn pomo-reset" onclick="pomoReset()" title="Reset">↺</button>
                   </div>
                   <div class="pomo-dur-row">
                     <button class="pomo-dur-btn" onclick="pomoSetDur(25)" id="pomoDur25">25m</button>
                     <button class="pomo-dur-btn" onclick="pomoSetDur(50)" id="pomoDur50">50m</button>
-                    <button class="pomo-dur-btn pomo-auto-btn" id="pomoAutoBtn" onclick="pomoToggleAuto()" title="Auto-switch to break">Auto</button>
+                    <button class="pomo-dur-btn pomo-auto-btn" id="pomoAutoBtn" onclick="pomoToggleAuto()">Auto</button>
                   </div>
+                </div>
+                <!-- Stopwatch view -->
+                <div class="pomo-centre-zone" id="swView" style="display:none;">
+                  <div class="sw-display" id="swDisplay">00:00</div>
+                  <div class="pomo-mode-lbl" id="swLapLbl" style="font-size:10px;color:var(--hint);min-height:14px;"></div>
+                  <div class="pomo-btns">
+                    <button class="pomo-btn pomo-start" id="swStartBtn" onclick="swToggle()">▶</button>
+                    <button class="pomo-btn" onclick="swLap()" id="swLapBtn" title="Lap">◎</button>
+                    <button class="pomo-btn pomo-reset" onclick="swReset()" title="Reset">↺</button>
+                  </div>
+                  <button class="pomo-dur-btn" onclick="swLogStudy()" style="margin-top:4px;" title="Log elapsed time to study hours">+ Log to study</button>
+                  <div id="swLaps" style="width:100%;max-height:60px;overflow-y:auto;"></div>
                 </div>
               </div>
 
@@ -1163,10 +1183,11 @@ textarea:focus { border-color: var(--border2); }
             <!-- Pomodoro tile (FV) — shared state with screensaver -->
             <div class="glance-tile pomo-sub-tile">
               <div class="pomo-header-row">
-                <span class="tile-label">⏱ Focus</span>
+                <span class="tile-label">⏱ <span id="timerModeLabel2">Focus</span></span>
                 <span class="pomo-session-count" id="pomoSessionCount2"></span>
+                <button class="pomo-mode-toggle" onclick="toggleTimerMode()" title="Switch mode">⇄</button>
               </div>
-              <div class="pomo-centre-zone">
+              <div class="pomo-centre-zone" id="pomoView2">
                 <div class="pomo-ring-wrap" style="width:100px;height:100px;">
                   <svg class="pomo-ring" viewBox="0 0 64 64" style="width:100px;height:100px;">
                     <circle class="pomo-ring-bg" cx="32" cy="32" r="28"/>
@@ -1178,6 +1199,7 @@ textarea:focus { border-color: var(--border2); }
                 <div class="pomo-mode-lbl" id="pomoModeLbl2">Focus</div>
                 <div class="pomo-btns">
                   <button class="pomo-btn pomo-start" id="pomoStartBtn2" onclick="pomoToggle()">▶</button>
+                  <button class="pomo-btn" id="pomoSkipBtn2" onclick="pomoSkip()" title="Skip break" style="display:none;">⏭</button>
                   <button class="pomo-btn pomo-reset" onclick="pomoReset()" title="Reset">↺</button>
                 </div>
                 <div class="pomo-dur-row">
@@ -1185,6 +1207,17 @@ textarea:focus { border-color: var(--border2); }
                   <button class="pomo-dur-btn" onclick="pomoSetDur(50)" id="pomoDur50b">50m</button>
                   <button class="pomo-dur-btn pomo-auto-btn" id="pomoAutoBtn2" onclick="pomoToggleAuto()">Auto ✓</button>
                 </div>
+              </div>
+              <div class="pomo-centre-zone" id="swView2" style="display:none;">
+                <div class="sw-display" id="swDisplay2">00:00</div>
+                <div class="pomo-mode-lbl" id="swLapLbl2" style="font-size:10px;color:var(--hint);min-height:14px;"></div>
+                <div class="pomo-btns">
+                  <button class="pomo-btn pomo-start" id="swStartBtn2" onclick="swToggle()">▶</button>
+                  <button class="pomo-btn" onclick="swLap()" title="Lap">◎</button>
+                  <button class="pomo-btn pomo-reset" onclick="swReset()" title="Reset">↺</button>
+                </div>
+                <button class="pomo-dur-btn" onclick="swLogStudy()" style="margin-top:4px;" title="Log elapsed time to study hours">+ Log to study</button>
+                <div id="swLaps2" style="width:100%;max-height:60px;overflow-y:auto;"></div>
               </div>
             </div>
           </div>
@@ -4194,6 +4227,11 @@ function pomoRender() {
   // Sync start button state
   const running = _pomoState.running;
   ['pomoStartBtn','pomoStartBtn2'].forEach(id => { const el=document.getElementById(id); if(el){ el.textContent=running?'⏸':'▶'; el.classList.toggle('running',running); } });
+  // Show skip button only during break
+  ['pomoSkipBtn','pomoSkipBtn2'].forEach(id => {
+    const el=document.getElementById(id);
+    if(el) el.style.display = _pomoState.mode==='break' ? 'flex' : 'none';
+  });
   // Sync auto button
   ['pomoAutoBtn','pomoAutoBtn2'].forEach(id => { const el=document.getElementById(id); if(el){ el.classList.toggle('auto-on',_pomoState.autoBreak); el.textContent=_pomoState.autoBreak?'Auto ✓':'Auto'; } });
   // Sync dur buttons
@@ -4203,18 +4241,113 @@ function pomoRender() {
   });
 }
 
+// ── STOPWATCH ──
+let _sw = { running: false, startTime: null, elapsed: 0, interval: null, laps: [] };
+
+function swToggle() {
+  if (_sw.running) {
+    _sw.elapsed += Date.now() - _sw.startTime;
+    _sw.startTime = null;
+    _sw.running = false;
+    clearInterval(_sw.interval);
+  } else {
+    _sw.startTime = Date.now();
+    _sw.running = true;
+    _sw.interval = setInterval(swRender, 100);
+  }
+  swRender();
+}
+
+function swReset() {
+  clearInterval(_sw.interval);
+  _sw = { running: false, startTime: null, elapsed: 0, interval: null, laps: [] };
+  swRender();
+}
+
+function swLap() {
+  if (!_sw.running && _sw.elapsed === 0) return;
+  const total = _sw.elapsed + (_sw.startTime ? Date.now() - _sw.startTime : 0);
+  const prev = _sw.laps.reduce((a, b) => a + b, 0);
+  _sw.laps.push(total - prev);
+  swRender();
+}
+
+function swFormat(ms) {
+  const totalSecs = Math.floor(ms / 1000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  const cents = Math.floor((ms % 1000) / 10);
+  return String(mins).padStart(2,'0') + ':' + String(secs).padStart(2,'0') + '.' + String(cents).padStart(2,'0');
+}
+
+function swRender() {
+  const total = _sw.elapsed + (_sw.startTime ? Date.now() - _sw.startTime : 0);
+  const timeStr = swFormat(total);
+  ['swDisplay','swDisplay2'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent=timeStr; });
+  // Lap label — show last lap
+  const lapStr = _sw.laps.length ? 'Lap ' + _sw.laps.length + ': ' + swFormat(_sw.laps[_sw.laps.length-1]) : '';
+  ['swLapLbl','swLapLbl2'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent=lapStr; });
+  // Start/pause buttons
+  ['swStartBtn','swStartBtn2'].forEach(id => { const el=document.getElementById(id); if(el) { el.textContent=_sw.running?'⏸':'▶'; el.classList.toggle('running',_sw.running); } });
+  // Laps list
+  ['swLaps','swLaps2'].forEach(id => {
+    const el=document.getElementById(id); if(!el) return;
+    el.innerHTML = _sw.laps.map((l,i) => `<div class="sw-lap-item">Lap ${i+1} — ${swFormat(l)}</div>`).reverse().join('');
+  });
+}
+
+function swLogStudy() {
+  const total = _sw.elapsed + (_sw.startTime ? Date.now() - _sw.startTime : 0);
+  if (total < 60000) { alert('Less than 1 minute — keep going!'); return; }
+  const mins = Math.round(total / 60000);
+  loadTodayDraft();
+  if (!draft.studyHrs) draft.studyHrs = {h:0, m:0, locked:false};
+  draft.studyHrs.m += mins;
+  draft.studyHrs.h += Math.floor(draft.studyHrs.m / 60);
+  draft.studyHrs.m = draft.studyHrs.m % 60;
+  draft.studyLastUpdated = Date.now();
+  saveDay();
+  renderStudyTile();
+  flash();
+  // Reset stopwatch after logging
+  swReset();
+}
+
+function pomoSkip() {
+  // Skip break — go straight back to focus
+  if (_pomoState.mode !== 'break') return;
+  clearInterval(_pomoState.interval);
+  _pomoState.running = false;
+  _pomoState.mode = 'focus';
+  _pomoState.secsLeft = _pomoState.durMin * 60;
+  _pomoState.totalSecs = _pomoState.durMin * 60;
+  _pomoState.endTime = null;
+  // Hide skip buttons
+  ['pomoSkipBtn','pomoSkipBtn2'].forEach(id => { const el=document.getElementById(id); if(el) el.style.display='none'; });
+  pomoRender();
+}
+
+// ── TIMER MODE TOGGLE ──
+let _timerMode = 'pomo'; // 'pomo' | 'sw'
+
+function toggleTimerMode() {
+  _timerMode = _timerMode === 'pomo' ? 'sw' : 'pomo';
+  const isPomo = _timerMode === 'pomo';
+  const label = isPomo ? 'Focus' : 'Stopwatch';
+  ['timerModeLabel','timerModeLabel2'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent=label; });
+  ['pomoView','pomoView2'].forEach(id => { const el=document.getElementById(id); if(el) el.style.display=isPomo?'flex':'none'; });
+  ['swView','swView2'].forEach(id => { const el=document.getElementById(id); if(el) el.style.display=isPomo?'none':'flex'; });
+}
+
 // ── PAGE VISIBILITY: recalc timer when tab regains focus ──
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && _pomoState.running && _pomoState.endTime) {
-    // Recalculate secsLeft based on endTime — corrects for background throttling
-    const secsLeft = Math.round((_pomoState.endTime - Date.now()) / 1000);
-    if (secsLeft <= 0) {
-      _pomoState.secsLeft = 0;
-      pomoComplete();
-    } else {
-      _pomoState.secsLeft = secsLeft;
-      pomoRender();
+  if (!document.hidden) {
+    if (_pomoState.running && _pomoState.endTime) {
+      const secsLeft = Math.round((_pomoState.endTime - Date.now()) / 1000);
+      if (secsLeft <= 0) { _pomoState.secsLeft = 0; pomoComplete(); }
+      else { _pomoState.secsLeft = secsLeft; pomoRender(); }
     }
+    if (_sw.running) swRender(); // stopwatch self-corrects from startTime
   }
 });
 
