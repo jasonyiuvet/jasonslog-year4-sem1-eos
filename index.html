@@ -1141,13 +1141,50 @@ textarea:focus { border-color: var(--border2); }
               </div>
               <div class="tile-list" id="tileThought2List"></div>
             </div>
-            <div class="glance-tile">
-              <div class="tile-header"><span class="tile-label">📚 Study</span></div>
-              <div class="study-tile-val" id="studyTileVal2">0h 0m</div>
-              <div class="study-tile-sub">today<span class="study-timestamp" id="studyTileTimestamp2"></span></div>
-              <div class="study-stepper">
-                <div class="study-grp"><button class="study-step-btn" onclick="tileNudgeStudy('h',-1)">−</button><button class="study-step-btn" onclick="tileNudgeStudy('h',1)">+</button><label>hrs</label></div>
-                <div class="study-grp"><button class="study-step-btn" onclick="tileNudgeStudy('m',-5)">−</button><button class="study-step-btn" onclick="tileNudgeStudy('m',5)">+</button><label>min</label></div>
+            <!-- Study logged tile (FV) -->
+            <div class="glance-tile pomo-sub-tile">
+              <div class="tile-header">
+                <span class="tile-label">📚 Study logged</span>
+                <button class="reset-btn" onclick="setStudyTarget()" id="studyTargetBtn2" title="Set target">🎯 4h</button>
+              </div>
+              <div class="pomo-centre-zone">
+                <div class="study-tile-val" id="studyTileVal2" style="font-size:38px;">0h 0m</div>
+                <div class="study-tile-sub" style="font-size:12px;">today<span class="study-timestamp" id="studyTileTimestamp2"></span></div>
+                <div class="study-target-bar" id="studyTargetBar2" style="display:none;width:100%;">
+                  <div class="study-target-track"><div class="study-target-fill" id="studyTargetFill2" style="width:0%"></div></div>
+                  <div class="study-target-lbl"><span id="studyTargetLbl2">0h / 4h</span><span id="studyTargetPct2">0%</span></div>
+                </div>
+                <div class="study-stepper">
+                  <div class="study-grp"><button class="study-step-btn" onclick="tileNudgeStudy('h',-1)">−</button><button class="study-step-btn" onclick="tileNudgeStudy('h',1)">+</button><label>hrs</label></div>
+                  <div class="study-grp"><button class="study-step-btn" onclick="tileNudgeStudy('m',-5)">−</button><button class="study-step-btn" onclick="tileNudgeStudy('m',5)">+</button><label>min</label></div>
+                </div>
+              </div>
+            </div>
+            <!-- Pomodoro tile (FV) — shared state with screensaver -->
+            <div class="glance-tile pomo-sub-tile">
+              <div class="pomo-header-row">
+                <span class="tile-label">⏱ Focus</span>
+                <span class="pomo-session-count" id="pomoSessionCount2"></span>
+              </div>
+              <div class="pomo-centre-zone">
+                <div class="pomo-ring-wrap" style="width:100px;height:100px;">
+                  <svg class="pomo-ring" viewBox="0 0 64 64" style="width:100px;height:100px;">
+                    <circle class="pomo-ring-bg" cx="32" cy="32" r="28"/>
+                    <circle class="pomo-ring-fg" id="pomoRingFg2" cx="32" cy="32" r="28"
+                      stroke-dasharray="175.9" stroke-dashoffset="0"/>
+                  </svg>
+                  <div class="pomo-countdown" id="pomoCountdown2" style="font-size:22px;">25:00</div>
+                </div>
+                <div class="pomo-mode-lbl" id="pomoModeLbl2">Focus</div>
+                <div class="pomo-btns">
+                  <button class="pomo-btn pomo-start" id="pomoStartBtn2" onclick="pomoToggle()">▶</button>
+                  <button class="pomo-btn pomo-reset" onclick="pomoReset()" title="Reset">↺</button>
+                </div>
+                <div class="pomo-dur-row">
+                  <button class="pomo-dur-btn" onclick="pomoSetDur(25)" id="pomoDur25b">25m</button>
+                  <button class="pomo-dur-btn" onclick="pomoSetDur(50)" id="pomoDur50b">50m</button>
+                  <button class="pomo-dur-btn pomo-auto-btn" id="pomoAutoBtn2" onclick="pomoToggleAuto()">Auto ✓</button>
+                </div>
               </div>
             </div>
           </div>
@@ -1560,7 +1597,7 @@ textarea:focus { border-color: var(--border2); }
 
 <script>
 // ── CONFIG ──
-const PASS = 'togbet-zoqdaf-fyMmi5)][;.,';
+const PASS_HASH = 'aa0108b94ad175904bdd3adffc4d577909054180119b7a7a57fe5aedca82a39b';
 const QUOTES = [
   "The pain of discipline weighs ounces. The pain of regret weighs tons.",
   "Do something today that your future self will thank you for.",
@@ -1592,7 +1629,11 @@ let _lastTickDate = null;
 let custMoods   = JSON.parse(localStorage.getItem('jl_cm') || '[]');
 
 function today() { const d = new Date(); d.setHours(0,0,0,0); return d; }
-function dateKey(d) { return d.toISOString().slice(0,10); }
+function dateKey(d) {
+  return d.getFullYear() + '-' +
+    String(d.getMonth()+1).padStart(2,'0') + '-' +
+    String(d.getDate()).padStart(2,'0');
+}
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
 
 function draftHasContent(d) {
@@ -1669,13 +1710,17 @@ function applyTheme() {
 }
 
 // ── AUTH ──
-function unlock() {
+async function unlock() {
   const inp = document.getElementById('passInput');
   const err = document.getElementById('authError');
   const btn = document.getElementById('unlockBtn');
   err.textContent = '';
   if (!inp.value) { err.textContent = 'Please enter your passphrase.'; return; }
-  if (inp.value !== PASS) { err.textContent = 'Incorrect passphrase. Try again.'; inp.value = ''; inp.focus(); return; }
+  // Hash the input and compare — passphrase never stored in plain text
+  const encoded = new TextEncoder().encode(inp.value);
+  const hashBuf = await crypto.subtle.digest('SHA-256', encoded);
+  const hashHex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('');
+  if (hashHex !== PASS_HASH) { err.textContent = 'Incorrect passphrase. Try again.'; inp.value = ''; inp.focus(); return; }
   btn.disabled = true; btn.textContent = '✓ Unlocking…';
   sessionStorage.setItem('jl_ok', '1');
   setTimeout(() => {
@@ -2508,20 +2553,18 @@ function renderStudyTile() {
   ['studyTileTimestamp','studyTileTimestamp2'].forEach(id => {
     const el = document.getElementById(id); if (el) el.textContent = tsStr;
   });
-  // Target progress bar
-  const bar = document.getElementById('studyTargetBar');
-  const fill = document.getElementById('studyTargetFill');
-  const lbl = document.getElementById('studyTargetLbl');
-  const pct = document.getElementById('studyTargetPct');
-  const btn = document.getElementById('studyTargetBtn');
-  if (btn) btn.textContent = '🎯 ' + _studyTargetH + 'h';
-  if (bar && _studyTargetH > 0) {
+  // Target progress bar — update both SS and FV
+  if (_studyTargetH > 0) {
     const doneH = sh.h + sh.m/60;
     const progress = Math.min(100, Math.round(doneH / _studyTargetH * 100));
-    bar.style.display = 'block';
-    if (fill) { fill.style.width = progress + '%'; fill.style.background = progress >= 100 ? 'var(--green)' : progress >= 60 ? '#f0c86a' : 'var(--red)'; }
-    if (lbl) lbl.textContent = doneH.toFixed(1) + 'h / ' + _studyTargetH + 'h';
-    if (pct) pct.textContent = progress + '%';
+    const fillCol = progress >= 100 ? 'var(--green)' : progress >= 60 ? '#f0c86a' : 'var(--red)';
+    const lblText = doneH.toFixed(1) + 'h / ' + _studyTargetH + 'h';
+    const pctText = progress + '%';
+    ['studyTargetBar','studyTargetBar2'].forEach(id => { const el=document.getElementById(id); if(el) el.style.display='block'; });
+    ['studyTargetFill','studyTargetFill2'].forEach(id => { const el=document.getElementById(id); if(el){ el.style.width=progress+'%'; el.style.background=fillCol; } });
+    ['studyTargetLbl','studyTargetLbl2'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent=lblText; });
+    ['studyTargetPct','studyTargetPct2'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent=pctText; });
+    ['studyTargetBtn','studyTargetBtn2'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent='🎯 '+_studyTargetH+'h'; });
   }
 }
 
@@ -2577,8 +2620,21 @@ function calcSleep(d) {
   return null;
 }
 
-function getSunday(d) { const r=new Date(d);r.setHours(0,0,0,0);r.setDate(r.getDate()-r.getDay());return r; }
-function weekKeys(sun) { return Array.from({length:7},(_,i)=>{const d=new Date(sun);d.setDate(d.getDate()+i);return dateKey(d);}); }
+function getSunday(d) {
+  const r = new Date(d);
+  r.setHours(0,0,0,0); // force local midnight
+  r.setDate(r.getDate() - r.getDay());
+  r.setHours(0,0,0,0); // re-force after setDate
+  return r;
+}
+function weekKeys(sun) {
+  return Array.from({length:7}, (_,i) => {
+    const d = new Date(sun);
+    d.setDate(d.getDate() + i);
+    d.setHours(0,0,0,0);
+    return dateKey(d);
+  });
+}
 function availableWeeks() {
   const seen=new Set(), suns=[];
   Object.keys(allLogs).sort().reverse().forEach(k=>{const s=getSunday(new Date(k+'T00:00:00')),sk=dateKey(s);if(!seen.has(sk)){seen.add(sk);suns.push(s);}});
@@ -4118,18 +4174,28 @@ function pomoRender() {
   const m = Math.floor(_pomoState.secsLeft / 60);
   const s = _pomoState.secsLeft % 60;
   const timeStr = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
-  const countdown = document.getElementById('pomoCountdown');
-  const ring = document.getElementById('pomoRingFg');
-  const modeLbl = document.getElementById('pomoModeLbl');
-  const sessions = document.getElementById('pomoSessionCount');
-  if (countdown) countdown.textContent = timeStr;
-  if (ring) {
-    const progress = _pomoState.secsLeft / _pomoState.totalSecs;
-    ring.style.strokeDashoffset = POMO_CIRC * (1 - progress);
-    ring.className = 'pomo-ring-fg' + (_pomoState.mode === 'break' ? ' break' : '');
-  }
-  if (modeLbl) { modeLbl.textContent = _pomoState.mode === 'focus' ? 'Focus' : '☕ Break'; modeLbl.style.color = _pomoState.mode === 'break' ? 'var(--teal)' : 'var(--muted)'; }
-  if (sessions) sessions.textContent = _pomoState.sessions > 0 ? `${_pomoState.sessions} session${_pomoState.sessions > 1 ? 's' : ''} ✓` : '';
+  // Update both SS and FV elements
+  ['pomoCountdown','pomoCountdown2'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent=timeStr; });
+  ['pomoRingFg','pomoRingFg2'].forEach(id => {
+    const ring=document.getElementById(id); if(!ring) return;
+    ring.style.strokeDashoffset = POMO_CIRC * (1 - _pomoState.secsLeft/_pomoState.totalSecs);
+    ring.className = 'pomo-ring-fg' + (_pomoState.mode==='break'?' break':'');
+  });
+  const modeText = _pomoState.mode==='focus' ? 'Focus' : '☕ Break';
+  const modeCol  = _pomoState.mode==='break' ? 'var(--teal)' : 'var(--muted)';
+  ['pomoModeLbl','pomoModeLbl2'].forEach(id => { const el=document.getElementById(id); if(el){ el.textContent=modeText; el.style.color=modeCol; } });
+  const sessText = _pomoState.sessions > 0 ? `${_pomoState.sessions} session${_pomoState.sessions>1?'s':''} ✓` : '';
+  ['pomoSessionCount','pomoSessionCount2'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent=sessText; });
+  // Sync start button state
+  const running = _pomoState.running;
+  ['pomoStartBtn','pomoStartBtn2'].forEach(id => { const el=document.getElementById(id); if(el){ el.textContent=running?'⏸':'▶'; el.classList.toggle('running',running); } });
+  // Sync auto button
+  ['pomoAutoBtn','pomoAutoBtn2'].forEach(id => { const el=document.getElementById(id); if(el){ el.classList.toggle('auto-on',_pomoState.autoBreak); el.textContent=_pomoState.autoBreak?'Auto ✓':'Auto'; } });
+  // Sync dur buttons
+  [['pomoDur25','pomoDur25b'],['pomoDur50','pomoDur50b']].forEach(([a,b],i) => {
+    const active = (i===0 && _pomoState.durMin===25)||(i===1 && _pomoState.durMin===50);
+    [a,b].forEach(id => { const el=document.getElementById(id); if(el) el.classList.toggle('active',active); });
+  });
 }
 
 // ── RESTORE SESSION ──
