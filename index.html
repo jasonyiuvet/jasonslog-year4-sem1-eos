@@ -4028,7 +4028,8 @@ let _pomoState = {
   sessions: 0,
   interval: null,
   lastDate: null,
-  autoBreak: true,  // auto-switch to break after focus
+  autoBreak: true,
+  endTime: null,   // timestamp when current session ends
 };
 
 function pomoInit() {
@@ -4047,22 +4048,29 @@ function pomoInit() {
 
 function pomoToggle() {
   if (_pomoState.running) {
+    // Pause — save remaining secs, clear endTime
     clearInterval(_pomoState.interval);
     _pomoState.running = false;
-    const btn = document.getElementById('pomoStartBtn');
-    if (btn) { btn.textContent = '▶'; btn.classList.remove('running'); }
+    _pomoState.endTime = null;
   } else {
+    // Start — set endTime based on secsLeft from now
     _pomoState.running = true;
-    const btn = document.getElementById('pomoStartBtn');
-    if (btn) { btn.textContent = '⏸'; btn.classList.add('running'); }
-    _pomoState.interval = setInterval(pomoTick, 1000);
+    _pomoState.endTime = Date.now() + _pomoState.secsLeft * 1000;
+    _pomoState.interval = setInterval(pomoTick, 500); // check twice/sec for accuracy
   }
+  pomoRender();
 }
 
 function pomoTick() {
-  _pomoState.secsLeft--;
-  if (_pomoState.secsLeft <= 0) pomoComplete();
-  else pomoRender();
+  if (!_pomoState.running || !_pomoState.endTime) return;
+  const secsLeft = Math.round((_pomoState.endTime - Date.now()) / 1000);
+  if (secsLeft <= 0) {
+    _pomoState.secsLeft = 0;
+    pomoComplete();
+  } else {
+    _pomoState.secsLeft = secsLeft;
+    pomoRender();
+  }
 }
 
 function pomoPing() {
@@ -4113,31 +4121,28 @@ function pomoComplete() {
     renderStudyTile();
     flash();
     if (_pomoState.autoBreak) {
-      // Auto-switch to break after short delay so user sees completion
       setTimeout(() => {
         _pomoState.mode = 'break';
         _pomoState.secsLeft = 5 * 60;
         _pomoState.totalSecs = 5 * 60;
-        pomoRender();
-        // Auto-start break
         _pomoState.running = true;
-        const btn = document.getElementById('pomoStartBtn');
-        if (btn) { btn.textContent = '⏸'; btn.classList.add('running'); }
-        _pomoState.interval = setInterval(pomoTick, 1000);
+        _pomoState.endTime = Date.now() + 5 * 60 * 1000;
+        _pomoState.interval = setInterval(pomoTick, 500);
+        pomoRender();
       }, 1500);
     } else {
       _pomoState.mode = 'break';
       _pomoState.secsLeft = 5 * 60;
       _pomoState.totalSecs = 5 * 60;
+      _pomoState.endTime = null;
     }
   } else {
     _pomoState.mode = 'focus';
     _pomoState.secsLeft = _pomoState.durMin * 60;
     _pomoState.totalSecs = _pomoState.durMin * 60;
+    _pomoState.endTime = null;
   }
-
-  const btn = document.getElementById('pomoStartBtn');
-  if (btn) { btn.textContent = '▶'; btn.classList.remove('running'); }
+  _pomoState.running = false;
   pomoRender();
 }
 
@@ -4147,8 +4152,7 @@ function pomoReset() {
   _pomoState.mode = 'focus';
   _pomoState.secsLeft = _pomoState.durMin * 60;
   _pomoState.totalSecs = _pomoState.durMin * 60;
-  const btn = document.getElementById('pomoStartBtn');
-  if (btn) { btn.textContent = '▶'; btn.classList.remove('running'); }
+  _pomoState.endTime = null;
   pomoRender();
 }
 
@@ -4158,6 +4162,7 @@ function pomoSetDur(mins) {
   _pomoState.secsLeft = mins * 60;
   _pomoState.totalSecs = mins * 60;
   _pomoState.mode = 'focus';
+  _pomoState.endTime = null;
   document.querySelectorAll('.pomo-dur-btn:not(.pomo-auto-btn)').forEach(b => b.classList.remove('active'));
   const btn = document.getElementById(mins === 25 ? 'pomoDur25' : 'pomoDur50');
   if (btn) btn.classList.add('active');
@@ -4197,6 +4202,21 @@ function pomoRender() {
     [a,b].forEach(id => { const el=document.getElementById(id); if(el) el.classList.toggle('active',active); });
   });
 }
+
+// ── PAGE VISIBILITY: recalc timer when tab regains focus ──
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && _pomoState.running && _pomoState.endTime) {
+    // Recalculate secsLeft based on endTime — corrects for background throttling
+    const secsLeft = Math.round((_pomoState.endTime - Date.now()) / 1000);
+    if (secsLeft <= 0) {
+      _pomoState.secsLeft = 0;
+      pomoComplete();
+    } else {
+      _pomoState.secsLeft = secsLeft;
+      pomoRender();
+    }
+  }
+});
 
 // ── RESTORE SESSION ──
 window.addEventListener('DOMContentLoaded', () => {
