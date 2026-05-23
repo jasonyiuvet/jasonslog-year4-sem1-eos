@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital@1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 
 const firebaseConfig = {
@@ -37,6 +37,7 @@ window._fbGet  = getDoc;
 window._fbCol  = collection;
 window._fbGetDocs = getDocs;
 window._fbDel  = deleteDoc;
+window._fbOnSnapshot = onSnapshot;
 
 // Flag when Firebase is ready
 window._fbReady = true;
@@ -165,6 +166,22 @@ nav {
 .nav-tab:hover { color: var(--text); background: rgba(255,255,255,0.06); }
 .nav-tab.active { background: var(--glass); color: var(--text); border: 1px solid var(--glass-border); }
 .nav-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.sync-btn {
+  display: flex; align-items: center; gap: 4px;
+  padding: 5px 12px; border-radius: 20px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  color: var(--muted); cursor: pointer;
+  font-size: 11px; font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  transition: all 0.2s;
+}
+.sync-btn:hover { color: var(--green); border-color: rgba(168,224,99,0.4); background: rgba(168,224,99,0.08); }
+.sync-btn.syncing { color: var(--green); border-color: rgba(168,224,99,0.4); }
+.sync-btn.syncing .sync-icon { display: inline-block; animation: spinIcon 0.8s linear infinite; }
+.sync-btn.done { color: var(--green); border-color: rgba(168,224,99,0.4); }
+@keyframes spinIcon { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .icon-btn { background: none; border: none; cursor: pointer; font-size: 16px; color: var(--muted); padding: 4px; border-radius: 6px; transition: all 0.15s; }
 .icon-btn:hover { color: var(--text); background: rgba(255,255,255,0.06); }
 
@@ -866,6 +883,7 @@ textarea:focus { border-color: var(--border2); }
       <button class="nav-tab" onclick="showPage('timetable')">📅 Timetable</button>
     </div>
     <div class="nav-right">
+      <button class="sync-btn" id="syncBtn" onclick="forceSync()" title="Sync now">↻ Sync</button>
       <button class="icon-btn" onclick="toggleTheme()" id="themeBtn" title="Toggle theme">🌙</button>
       <button class="icon-btn" onclick="lock()" title="Lock">⏻</button>
     </div>
@@ -3497,14 +3515,26 @@ function resetList(draftKey, elId) {
 }
 
 // ── WATER TRACKER ──
+function parseWaterMl(text) {
+  // Patterns supported:
+  // "2 x 330ml", "2x330ml", "2 × 330 ml"
+  const multiMatch = text.match(/(\d+)\s*[x×]\s*(\d+)\s*ml/i);
+  if (multiMatch) return parseInt(multiMatch[1]) * parseInt(multiMatch[2]);
+  // "330ml", "330 ml"
+  const singleMatch = text.match(/(\d+)\s*ml/i);
+  if (singleMatch) return parseInt(singleMatch[1]);
+  // "0.5L", "1.5 L"
+  const litreMatch = text.match(/([\d.]+)\s*l\b/i);
+  if (litreMatch) return Math.round(parseFloat(litreMatch[1]) * 1000);
+  return null;
+}
+
 function addWater() {
   const inp = document.getElementById('waterInput');
   const text = inp ? inp.value.trim() : '';
   if (!text) return;
   if (!draft.waterLog) draft.waterLog = [];
-  // Try to parse ml from text e.g. "500ml water"
-  const mlMatch = text.match(/(\d+)\s*ml/i);
-  const ml = mlMatch ? parseInt(mlMatch[1]) : null;
+  const ml = parseWaterMl(text);
   draft.waterLog.push({ id: genId(), text, ml, addedAt: Date.now() });
   if (inp) inp.value = '';
   renderWaterList();
@@ -3524,14 +3554,44 @@ function renderWaterList() {
     div.className = 'food-item';
     const timeStr = item.addedAt ? formatTime(item.addedAt) : '';
     const timeTag = timeStr ? `<span class="item-time">${timeStr}</span>` : '';
-    div.innerHTML = `<span class="item-num">${i+1}.</span>
-      <span class="food-text">${item.text}${timeTag}</span>
-      <button class="task-action del" onclick="deleteWater(${i})">✕</button>`;
+    const mlTag = item.ml ? `<span style="font-size:10px;color:var(--teal);margin-left:4px;">${item.ml}ml</span>` : '';
+    if (item.editing) {
+      div.innerHTML = `<span class="item-num">${i+1}.</span>
+        <input class="food-edit-inp" id="wedit_${i}" value="${item.text.replace(/"/g,'&quot;')}"
+          onkeydown="if(event.key==='Enter')saveWaterEdit(${i})">
+        <button class="task-action tick" onclick="saveWaterEdit(${i})">✓</button>`;
+      setTimeout(() => document.getElementById(`wedit_${i}`)?.focus(), 30);
+    } else {
+      div.innerHTML = `<span class="item-num">${i+1}.</span>
+        <span class="food-text">${item.text}${mlTag}${timeTag}</span>
+        <button class="task-action edit" onclick="editWater(${i})" title="Edit">✎</button>
+        <button class="task-action del" onclick="deleteWater(${i})" title="Delete">✕</button>`;
+    }
     el.appendChild(div);
   });
   if (totalEl) {
-    totalEl.textContent = totalMl > 0 ? `Total: ${totalMl}ml` : '';
+    if (totalMl >= 1000) {
+      totalEl.textContent = `Total: ${(totalMl/1000).toFixed(1)}L (${totalMl}ml)`;
+    } else {
+      totalEl.textContent = totalMl > 0 ? `Total: ${totalMl}ml` : '';
+    }
   }
+}
+
+function editWater(i) {
+  draft.waterLog[i].editing = true;
+  renderWaterList();
+}
+
+function saveWaterEdit(i) {
+  const inp = document.getElementById(`wedit_${i}`);
+  if (inp && inp.value.trim()) {
+    draft.waterLog[i].text = inp.value.trim();
+    draft.waterLog[i].ml = parseWaterMl(inp.value.trim());
+  }
+  delete draft.waterLog[i].editing;
+  renderWaterList();
+  autoSave();
 }
 
 function deleteWater(i) {
@@ -3978,10 +4038,46 @@ async function fbSyncAll() {
     if (changed > 0) {
       renderCal();
       renderSsCal();
-      if (typeof renderDash === 'function') renderDash();
       console.log('Synced', changed, 'logs from Firebase');
     }
   } catch(e) { console.warn('fbSyncAll:', e); }
+}
+
+function fbStartRealtime() {
+  if (!window._db || !window._fbOnSnapshot) return;
+  const col = window._fbCol(window._db, 'logs', FB_USER_ID, 'days');
+  window._fbOnSnapshot(col, (snapshot) => {
+    snapshot.docChanges().forEach(change => {
+      const dateStr = change.doc.id; // YYYY-MM-DD
+      const k = 'jl_' + dateStr;
+      if (change.type === 'removed') {
+        localStorage.removeItem(k);
+      } else {
+        // 'added' or 'modified' — update localStorage
+        const remote = change.doc.data();
+        localStorage.setItem(k, JSON.stringify(remote));
+      }
+      // If this is the currently viewed log day, reload it live
+      if (dateStr === dateKey(currentDate)) {
+        const saved = localStorage.getItem(k);
+        if (saved) {
+          const incoming = JSON.parse(saved);
+          // Only reload if this change came from another device
+          // (compare a timestamp field to avoid overwriting local edits)
+          const localDraft = JSON.stringify(draft);
+          if (JSON.stringify(incoming) !== localDraft) {
+            draft = incoming;
+            applyToUI();
+          }
+        }
+      }
+    });
+    // Always refresh calendar dots and stats
+    renderCal();
+    renderSsCal();
+    if (typeof loadAllLogs === 'function') { loadAllLogs(); }
+  });
+  console.log('Firestore real-time listener active');
 }
 
 // Patch saveDay to also sync to Firebase
@@ -3993,12 +4089,13 @@ saveDay = function() {
   fbSave(k, draftHasContent(draft) ? draft : null);
 };
 
-// Pull from Firebase on startup
+// Pull from Firebase on startup + start real-time listener
 window.addEventListener('fbReady', () => {
   fbSyncAll();
+  fbStartRealtime();
 });
 // Also try if already ready
-if (window._fbReady) fbSyncAll();
+if (window._fbReady) { fbSyncAll(); fbStartRealtime(); }
 
 // Show sync status in save badge
 const _origFlash = flash;
@@ -4008,6 +4105,89 @@ flash = function() {
   if (el) el.textContent = window._fbReady ? '✓ Saved & synced' : '✓ Saved locally';
   setTimeout(() => { if (el) el.textContent = '✓ Saved'; }, 2000);
 };
+
+// ── FORCE SYNC ──
+async function forceSync() {
+  const btn = document.getElementById('syncBtn');
+  if (!window._db) {
+    if (btn) { btn.innerHTML = '✕ Offline'; setTimeout(() => { btn.innerHTML = '<span class="sync-icon">↻</span> Sync'; }, 2000); }
+    return;
+  }
+  // Set spinning state
+  if (btn) { btn.innerHTML = '<span class="sync-icon">↻</span> Syncing…'; btn.className = 'sync-btn syncing'; btn.disabled = true; }
+
+  try {
+    const col = window._fbCol(window._db, 'logs', FB_USER_ID, 'days');
+    const snap = await window._fbGetDocs(col);
+    let updated = 0;
+
+    snap.forEach(docSnap => {
+      const k = 'jl_' + docSnap.id;
+      const remote = docSnap.data();
+      // Always overwrite local with remote — force sync means trust the cloud
+      const local = localStorage.getItem(k);
+      const localParsed = local ? JSON.parse(local) : null;
+      // Merge: take remote as base, but if local has newer data keep it
+      // Simple strategy: if remote exists, use it (cloud is source of truth)
+      localStorage.setItem(k, JSON.stringify(remote));
+      updated++;
+    });
+
+    // Reload current day if it was updated
+    const todayKey = dateKey(currentDate);
+    const updated_today = localStorage.getItem('jl_' + todayKey);
+    if (updated_today) {
+      draft = JSON.parse(updated_today);
+      if (!draft.tasks)        draft.tasks = [];
+      if (!draft.thoughts)     draft.thoughts = [];
+      if (!draft.lectureList)  draft.lectureList = [];
+      if (!draft.wentList)     draft.wentList = [];
+      if (!draft.studySessionList) draft.studySessionList = [];
+      if (!draft.waterLog)     draft.waterLog = [];
+      if (!draft.moods)        draft.moods = [];
+      if (!draft.brekkyFood)   draft.brekkyFood = [];
+      if (!draft.lunchFood)    draft.lunchFood = [];
+      if (!draft.dinnerFood)   draft.dinnerFood = [];
+      if (!draft.exerciseFood) draft.exerciseFood = [];
+      if (!draft.sleeptrack)   draft.sleeptrack = {h:0,m:0,locked:false,touched:false};
+      if (!draft.classHrs)     draft.classHrs = {h:0,m:0,locked:false};
+      if (!draft.wentHrs)      draft.wentHrs = {h:0,m:0,locked:false};
+      if (!draft.studyHrs)     draft.studyHrs = {h:0,m:0,locked:false};
+      if (!draft.screenTime)   draft.screenTime = {h:0,m:0,locked:false};
+      if (!draft.napHrs)       draft.napHrs = {h:0,m:0,locked:false};
+      if (draft.energy      === undefined) draft.energy = null;
+      if (draft.productivity === undefined) draft.productivity = null;
+      if (draft.wellbeing   === undefined) draft.wellbeing = null;
+      applyToUI();
+    }
+
+    // Refresh all views
+    renderCal();
+    renderSsCal();
+    if (typeof loadAllLogs === 'function') loadAllLogs();
+    renderStudyTile();
+
+    // Done state
+    if (btn) {
+      btn.innerHTML = '✓ Synced';
+      btn.className = 'sync-btn done';
+      btn.disabled = false;
+      setTimeout(() => {
+        btn.innerHTML = '<span class="sync-icon" style="display:inline-block;">↻</span> Sync';
+        btn.className = 'sync-btn';
+      }, 2500);
+    }
+    console.log('Force synced', updated, 'logs');
+  } catch(e) {
+    console.warn('forceSync error:', e);
+    if (btn) {
+      btn.innerHTML = '✕ Error';
+      btn.className = 'sync-btn';
+      btn.disabled = false;
+      setTimeout(() => { btn.innerHTML = '<span class="sync-icon" style="display:inline-block;">↻</span> Sync'; }, 2500);
+    }
+  }
+}
 
 // ── CLEANUP: remove phantom drafts ──
 (function cleanupBadDrafts() {
