@@ -166,6 +166,8 @@ nav {
 .nav-tab:hover { color: var(--text); background: rgba(255,255,255,0.06); }
 .nav-tab.active { background: var(--glass); color: var(--text); border: 1px solid var(--glass-border); }
 .nav-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.food-cal { font-size: 10px; color: var(--teal); margin-left: 5px; font-weight: 600; }
+.food-cal-total { font-size: 11px; color: var(--muted); margin-top: 6px; font-weight: 600; text-align: right; }
 .sync-btn {
   display: flex; align-items: center; gap: 4px;
   padding: 5px 12px; border-radius: 20px;
@@ -1455,18 +1457,31 @@ textarea:focus { border-color: var(--border2); }
     </div>
 
     <div class="card">
-      <div class="card-lbl" style="display:flex;justify-content:space-between;align-items:center;"><span>📚 Study / Revise</span><button class="reset-btn" onclick="resetLockable('studyHrs')">↺ Reset</button></div>
-      <div id="studyHrs_locked" style="display:none;" class="locked-row">
-        <span class="locked-val" id="studyHrs_txt"></span>
-        <button class="edit-btn" onclick="unlockField('studyHrs')">Edit</button>
+      <div class="card-lbl" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>📚 Study / Revise</span>
+        <button class="reset-btn" onclick="resetStudySessions()">↺ Reset</button>
       </div>
-      <div id="studyHrs_edit">
-        <div class="stepper">
-          <div class="step-grp"><button class="step-btn" onclick="nudge('studyHrs','h',-1)">−</button><span class="step-val" id="studyHrs_h">0</span><button class="step-btn" onclick="nudge('studyHrs','h',1)">+</button><label>hrs</label></div>
-          <div class="step-grp"><button class="step-btn" onclick="nudge('studyHrs','m',-5)">−</button><span class="step-val" id="studyHrs_m">00</span><button class="step-btn" onclick="nudge('studyHrs','m',5)">+</button><label>min</label></div>
+      <!-- Total display -->
+      <div id="studyTotalDisplay" style="font-size:13px;font-weight:600;color:var(--green);margin-bottom:10px;min-height:18px;"></div>
+      <!-- Session entry -->
+      <div class="stepper" style="align-items:center;gap:10px;">
+        <div class="step-grp">
+          <button class="step-btn" onclick="nudgeStudyEntry('h',-1)">−</button>
+          <span class="step-val" id="studyEntry_h">0</span>
+          <button class="step-btn" onclick="nudgeStudyEntry('h',1)">+</button>
+          <label>hrs</label>
         </div>
-        <button class="done-btn" onclick="lockField('studyHrs')">Done ✓</button>
+        <div class="step-grp">
+          <button class="step-btn" onclick="nudgeStudyEntry('m',-5)">−</button>
+          <span class="step-val" id="studyEntry_m">00</span>
+          <button class="step-btn" onclick="nudgeStudyEntry('m',5)">+</button>
+          <label>min</label>
+        </div>
+        <button class="done-btn" onclick="addStudyBlock()" style="margin-top:0;">+ Log</button>
       </div>
+      <!-- Logged blocks list -->
+      <div class="task-list" id="studyBlockList" style="margin-top:10px;"></div>
+      <!-- What did you study -->
       <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">
         <div class="card-lbl" style="margin-bottom:8px;font-size:10px;">📝 What did you study?</div>
         <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px;">
@@ -1669,7 +1684,7 @@ const QUOTES = [
   "Success is the sum of small efforts, repeated day in and day out.",
 ];
 const BASE_MOODS = ['Motivated','Focused','Calm','Anxious','Tired','Happy','Stressed','Energised','Creative','Grateful','Overwhelmed','Productive','Relaxed','Burnt out','Hopeful','Confident'];
-const LOCKABLE = ['classHrs','wentHrs','studyHrs','screenTime','napHrs','sleeptrack'];
+const LOCKABLE = ['classHrs','wentHrs','screenTime','napHrs','sleeptrack'];
 
 // ── STATE ──
 let currentDate = today();
@@ -1709,6 +1724,7 @@ function draftHasContent(d) {
   if (d.lectureList && d.lectureList.length)    return true;
   if (d.wentList    && d.wentList.length)       return true;
   if (d.studySessionList && d.studySessionList.length) return true;
+  if (d.studyBlocks    && d.studyBlocks.length)    return true;
   if (d.notes && d.notes.trim())          return true; // legacy field
   const stH = d.classHrs   && (d.classHrs.h   > 0 || d.classHrs.m   > 0);
   const stW = d.wentHrs    && (d.wentHrs.h    > 0 || d.wentHrs.m    > 0);
@@ -1734,6 +1750,7 @@ function newDraft() {
     classHrs:   {h:0, m:0, locked:false},
     wentHrs:    {h:0, m:0, locked:false},
     studyHrs:   {h:0, m:0, locked:false},
+    studyBlocks: [], // [{h,m,addedAt}] — individual logged sessions
     screenTime: {h:0, m:0, locked:false},
     brekky:null, lunch:null, dinner:null,
     brekkyFood:[], lunchFood:[], dinnerFood:[], exerciseFood:[],
@@ -1935,6 +1952,7 @@ function loadDay() {
   if (!draft.moods)        draft.moods = [];
   if (!draft.sleeptrack)   draft.sleeptrack = {h:0, m:0, locked:false, touched:false};
   if (!draft.studySessionList) draft.studySessionList = [];
+  if (!draft.studyBlocks) draft.studyBlocks = [];
   if (!draft.waterLog)     draft.waterLog = [];
   if (!draft.classHrs)     draft.classHrs  = {h:0, m:0, locked:false};
   if (!draft.wentHrs)      draft.wentHrs   = {h:0, m:0, locked:false};
@@ -2014,6 +2032,7 @@ function applyToUI() {
   renderGenericList('lectureList', 'lectureList');
   renderGenericList('wentList', 'wentList');
   renderGenericList('studySessionList', 'studySessionList');
+  renderStudyBlocks();
   renderWaterList();
   // Moods
   renderMoods();
@@ -2241,7 +2260,7 @@ function deleteTask(i)       { deleteGeneric('tasks','taskList',i); }
 // ── FOOD LISTS ──
 function tickFood(meal, i)  { const k=meal+'Food'; draft[k][i].done=!draft[k][i].done; renderFoodList(meal); autoSave(); }
 function editFood(meal, i)  { const k=meal+'Food'; draft[k][i].editing=true; renderFoodList(meal); setTimeout(()=>document.getElementById(`fedit_${meal}_${i}`)?.focus(),50); }
-function saveFoodEdit(meal,i){ const k=meal+'Food'; const inp=document.getElementById(`fedit_${meal}_${i}`); if(inp&&inp.value.trim())draft[k][i].text=inp.value.trim(); delete draft[k][i].editing; renderFoodList(meal); autoSave(); }
+function saveFoodEdit(meal,i){ const k=meal+'Food'; const inp=document.getElementById(`fedit_${meal}_${i}`); if(inp&&inp.value.trim()){ draft[k][i].text=inp.value.trim(); draft[k][i].cal=estimateCal(inp.value.trim()); } delete draft[k][i].editing; renderFoodList(meal); autoSave(); }
 function deleteFood(meal, i){ const k=meal+'Food'; draft[k].splice(i,1); renderFoodList(meal); autoSave(); }
 
 function renderFoodList(meal) {
@@ -2250,14 +2269,16 @@ function renderFoodList(meal) {
   el.innerHTML = '';
   const key = meal + 'Food';
   const list = draft[key] || [];
+  let totalCal = 0;
   list.forEach((f, i) => {
+    if (f.cal) totalCal += f.cal;
     const div = document.createElement('div');
     div.className = 'food-item' + (f.done ? ' done' : '');
     div.draggable = true;
     div.dataset.idx = i;
-
     const timeStr = f.addedAt ? formatTime(f.addedAt) : '';
     const timeTag = timeStr ? `<span class="item-time">${timeStr}</span>` : '';
+    const calTag = f.cal ? `<span class="food-cal">~${f.cal} kcal</span>` : '';
 
     if (f.editing) {
       div.innerHTML = `<span class="drag-handle">⠿</span>
@@ -2268,7 +2289,7 @@ function renderFoodList(meal) {
     } else {
       div.innerHTML = `<span class="drag-handle">⠿</span>
         <span class="item-num">${i+1}.</span>
-        <span class="food-text">${f.text}${timeTag}</span>
+        <span class="food-text">${f.text}${calTag}${timeTag}</span>
         <button class="task-action tick" onclick="tickFood('${meal}',${i})">✓</button>
         <button class="task-action" onclick="editFood('${meal}',${i})">✎</button>
         <button class="task-action del" onclick="deleteFood('${meal}',${i})">✕</button>`;
@@ -2295,6 +2316,15 @@ function renderFoodList(meal) {
 
     el.appendChild(div);
   });
+  // Calorie subtotal
+  let calEl = document.getElementById('foodCal_' + meal);
+  if (!calEl) {
+    calEl = document.createElement('div');
+    calEl.id = 'foodCal_' + meal;
+    calEl.className = 'food-cal-total';
+    el.parentElement.appendChild(calEl);
+  }
+  calEl.textContent = totalCal > 0 ? `~${totalCal} kcal total` : '';
 }
 function addFood(meal) {
   const inp = document.getElementById('foodInput_' + meal);
@@ -2302,7 +2332,8 @@ function addFood(meal) {
   if (!text) return;
   const key = meal + 'Food';
   if (!draft[key]) draft[key] = [];
-  draft[key].push({ id: genId(), text, done: false, addedAt: Date.now() });
+  const cal = estimateCal(text);
+  draft[key].push({ id: genId(), text, done: false, addedAt: Date.now(), cal });
   if (inp) inp.value = '';
   renderFoodList(meal); autoSave();
 }
@@ -3921,10 +3952,17 @@ function renderTtDays() {
 
     const db = document.createElement('div');
     db.className = 'tt-body';
-    day.blocks.forEach(block => {
+    day.blocks.forEach((block, bi) => {
       const bl = document.createElement('div');
       bl.className = 'tt-block';
       const tagHtml = block.tags.map(t => `<span class="tt-tag tt-${t}">${TT_TAG_MAP[t]||t}</span>`).join('');
+      const blockId = day.id + '_b' + bi;
+
+      // All blocks get a tickable title (especially live/prac with no lec list)
+      const titleKey = ttCheckKey(day.id, 'BLOCK_' + bi);
+      const titleChecked = localStorage.getItem(titleKey) === '1';
+
+      // Lecture items
       let lecsHtml = block.lecs.map(l => {
         const k = ttCheckKey(day.id, l);
         const checked = localStorage.getItem(k) === '1';
@@ -3932,11 +3970,40 @@ function renderTtDays() {
           <input type="checkbox" id="ttcb_${k}" ${checked?'checked':''} onchange="ttTick('${k}','${day.id}')">
           <label for="ttcb_${k}">${l}</label></div>`;
       }).join('');
+
+      // Custom user-added items for this block
+      const customKey = 'tt_custom_' + blockId;
+      const customItems = JSON.parse(localStorage.getItem(customKey) || '[]');
+      let customHtml = customItems.map((item, ci) => {
+        const ck = 'tt_ci_' + blockId + '_' + ci;
+        const checked = localStorage.getItem(ck) === '1';
+        return `<div class="tt-lec-item${checked?' done':''}" id="ttitem_${ck}" style="display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" id="ttcb_${ck}" ${checked?'checked':''} onchange="ttTickCustom('${blockId}',${ci})">
+          <label for="ttcb_${ck}" style="flex:1;">${item}</label>
+          <button onclick="ttDeleteCustom('${blockId}',${ci})" style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:11px;padding:0 2px;">✕</button>
+        </div>`;
+      }).join('');
+
       bl.innerHTML = `<div class="tt-time">${block.time}</div>
         <div class="tt-right">
-          <div class="tt-tags">${tagHtml}<span class="tt-title">${block.title}</span></div>
+          <div class="tt-tags" style="align-items:center;">
+            ${tagHtml}
+            <div class="tt-lec-item${titleChecked?' done':''}" id="ttitem_${titleKey}" style="margin:0;display:inline-flex;">
+              <input type="checkbox" id="ttcb_${titleKey}" ${titleChecked?'checked':''} onchange="ttTick('${titleKey}','${day.id}')">
+              <label for="ttcb_${titleKey}" style="font-weight:600;">${block.title}</label>
+            </div>
+          </div>
           ${lecsHtml}
+          ${customHtml}
           ${block.note?`<div class="tt-note">↳ ${block.note}</div>`:''}
+          <div style="margin-top:5px;">
+            <div class="tt-add-row" id="ttAddRow_${blockId}" style="display:none;gap:6px;margin-top:4px;">
+              <input class="tt-add-inp" id="ttAddInp_${blockId}" placeholder="Add note…"
+                onkeydown="if(event.key==='Enter')ttAddCustom('${blockId}')">
+              <button class="tt-add-save" onclick="ttAddCustom('${blockId}')">+ Add</button>
+            </div>
+            <button class="tt-add-btn" onclick="ttToggleAdd('${blockId}')">+ Add note</button>
+          </div>
         </div>`;
       db.appendChild(bl);
     });
@@ -3945,17 +4012,89 @@ function renderTtDays() {
   });
 }
 
+// Store all tt state in one Firestore doc for easy sync
+async function ttSyncToFb() {
+  if (!window._db) return;
+  try {
+    const data = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('tt_')) data[k] = localStorage.getItem(k);
+    }
+    const ref = window._fbDoc(window._db, 'timetable', FB_USER_ID);
+    await window._fbSet(ref, data);
+  } catch(e) { console.warn('ttSync:', e); }
+}
+
+async function ttSyncFromFb() {
+  if (!window._db) return;
+  try {
+    const ref = window._fbDoc(window._db, 'timetable', FB_USER_ID);
+    const snap = await window._fbGet(ref);
+    if (snap.exists()) {
+      const data = snap.data();
+      Object.keys(data).forEach(k => { if (k.startsWith('tt_')) localStorage.setItem(k, data[k]); });
+    }
+  } catch(e) { console.warn('ttSyncFrom:', e); }
+}
+
 function ttTick(k, dayId) {
   const cb = document.getElementById('ttcb_' + k);
   const item = document.getElementById('ttitem_' + k);
   localStorage.setItem(k, cb.checked ? '1' : '0');
   if (item) item.classList.toggle('done', cb.checked);
   renderTtProgress();
-  renderExamStrip(); // refresh countdown
+  renderExamStrip();
+  ttSyncToFb(); // async fire-and-forget
+}
+
+function ttToggleAdd(blockId) {
+  const row = document.getElementById('ttAddRow_' + blockId);
+  if (!row) return;
+  const shown = row.style.display !== 'none';
+  row.style.display = shown ? 'none' : 'flex';
+  if (!shown) setTimeout(() => document.getElementById('ttAddInp_' + blockId)?.focus(), 50);
+}
+
+function ttAddCustom(blockId) {
+  const inp = document.getElementById('ttAddInp_' + blockId);
+  const text = inp ? inp.value.trim() : '';
+  if (!text) return;
+  const customKey = 'tt_custom_' + blockId;
+  const items = JSON.parse(localStorage.getItem(customKey) || '[]');
+  items.push(text);
+  localStorage.setItem(customKey, JSON.stringify(items));
+  if (inp) inp.value = '';
+  ttSyncToFb();
+  renderTtDays();
+  renderTtProgress();
+}
+
+function ttDeleteCustom(blockId, ci) {
+  const customKey = 'tt_custom_' + blockId;
+  const items = JSON.parse(localStorage.getItem(customKey) || '[]');
+  items.splice(ci, 1);
+  localStorage.setItem(customKey, JSON.stringify(items));
+  // Also remove its tick state
+  localStorage.removeItem('tt_ci_' + blockId + '_' + ci);
+  ttSyncToFb();
+  renderTtDays();
+  renderTtProgress();
+}
+
+function ttTickCustom(blockId, ci) {
+  const ck = 'tt_ci_' + blockId + '_' + ci;
+  const cb = document.getElementById('ttcb_' + ck);
+  const item = document.getElementById('ttitem_' + ck);
+  localStorage.setItem(ck, cb.checked ? '1' : '0');
+  if (item) item.classList.toggle('done', cb.checked);
+  renderTtProgress();
+  ttSyncToFb();
 }
 
 // ── SUBJECT TAG ──
 let _selectedSubject = '';
+let _studyEntry = {h:0, m:0}; // current entry in steppers
 function selectSubject(btn, subj) {
   document.querySelectorAll('.subj-pill').forEach(b => b.classList.remove('active'));
   if (_selectedSubject === subj) { _selectedSubject = ''; return; } // toggle off
@@ -4023,6 +4162,8 @@ async function fbSyncAll() {
   // Pull all logs from Firestore and merge with localStorage
   if (!window._db) return;
   try {
+    // Sync timetable too
+    await ttSyncFromFb();
     const col = window._fbCol(window._db, 'logs', FB_USER_ID, 'days');
     const snap = await window._fbGetDocs(col);
     let changed = 0;
@@ -4093,9 +4234,9 @@ saveDay = function() {
 window.addEventListener('fbReady', () => {
   fbSyncAll();
   fbStartRealtime();
+  ttSyncFromFb().then(() => { if(document.getElementById('page-timetable')?.classList.contains('active')) renderTimetable(); });
 });
-// Also try if already ready
-if (window._fbReady) { fbSyncAll(); fbStartRealtime(); }
+if (window._fbReady) { fbSyncAll(); fbStartRealtime(); ttSyncFromFb(); }
 
 // Show sync status in save badge
 const _origFlash = flash;
@@ -4166,6 +4307,7 @@ async function forceSync() {
     renderSsCal();
     if (typeof loadAllLogs === 'function') loadAllLogs();
     renderStudyTile();
+    if (document.getElementById('page-timetable')?.classList.contains('active')) renderTimetable();
 
     // Done state
     if (btn) {
@@ -4188,6 +4330,189 @@ async function forceSync() {
     }
   }
 }
+
+// ── STUDY BLOCK LOGGER ──
+function nudgeStudyEntry(part, delta) {
+  if (part === 'h') _studyEntry.h = Math.max(0, _studyEntry.h + delta);
+  else _studyEntry.m = Math.max(0, Math.min(55, Math.round((_studyEntry.m + delta) / 5) * 5));
+  const hEl = document.getElementById('studyEntry_h');
+  const mEl = document.getElementById('studyEntry_m');
+  if (hEl) hEl.textContent = _studyEntry.h;
+  if (mEl) mEl.textContent = String(_studyEntry.m).padStart(2,'0');
+}
+
+function addStudyBlock() {
+  if (_studyEntry.h === 0 && _studyEntry.m === 0) return;
+  if (!draft.studyBlocks) draft.studyBlocks = [];
+  draft.studyBlocks.push({h: _studyEntry.h, m: _studyEntry.m, addedAt: Date.now()});
+  // Accumulate into studyHrs
+  recalcStudyHrs();
+  // Reset entry
+  _studyEntry = {h:0, m:0};
+  const hEl = document.getElementById('studyEntry_h');
+  const mEl = document.getElementById('studyEntry_m');
+  if (hEl) hEl.textContent = '0';
+  if (mEl) mEl.textContent = '00';
+  renderStudyBlocks();
+  renderStudyTile();
+  saveDay();
+}
+
+function recalcStudyHrs() {
+  // Sum all blocks into studyHrs
+  if (!draft.studyBlocks) draft.studyBlocks = [];
+  let totalMins = draft.studyBlocks.reduce((acc, b) => acc + b.h * 60 + b.m, 0);
+  draft.studyHrs = {
+    h: Math.floor(totalMins / 60),
+    m: totalMins % 60,
+    locked: false
+  };
+  draft.studyLastUpdated = Date.now();
+}
+
+function durStrShort(h, m) {
+  if (h === 0 && m === 0) return '0m';
+  return (h > 0 ? h + 'h ' : '') + (m > 0 ? m + 'm' : '');
+}
+
+function renderStudyBlocks() {
+  const el = document.getElementById('studyBlockList');
+  const totalEl = document.getElementById('studyTotalDisplay');
+  if (!el) return;
+  el.innerHTML = '';
+  const blocks = draft.studyBlocks || [];
+
+  // Total
+  let totalMins = blocks.reduce((acc, b) => acc + b.h*60 + b.m, 0);
+  if (totalEl) {
+    totalEl.textContent = totalMins > 0
+      ? 'Total: ' + durStrShort(Math.floor(totalMins/60), totalMins%60) + ' logged'
+      : '';
+  }
+
+  blocks.forEach((b, i) => {
+    const div = document.createElement('div');
+    div.className = 'task-item';
+    const ts = b.addedAt ? formatTime(b.addedAt) : '';
+    const timeTag = ts ? `<span class="item-time">${ts}</span>` : '';
+    div.innerHTML = `<span class="item-num">${i+1}.</span>
+      <span class="task-text">${durStrShort(b.h, b.m)}${timeTag}</span>
+      <button class="task-action del" onclick="deleteStudyBlock(${i})" title="Delete">✕</button>`;
+    el.appendChild(div);
+  });
+}
+
+function deleteStudyBlock(i) {
+  if (!draft.studyBlocks) return;
+  draft.studyBlocks.splice(i, 1);
+  recalcStudyHrs();
+  renderStudyBlocks();
+  renderStudyTile();
+  saveDay();
+}
+
+function resetStudySessions() {
+  draft.studyBlocks = [];
+  draft.studyHrs = {h:0, m:0, locked:false};
+  draft.studySessionList = [];
+  _studyEntry = {h:0, m:0};
+  const hEl = document.getElementById('studyEntry_h');
+  const mEl = document.getElementById('studyEntry_m');
+  if (hEl) hEl.textContent = '0';
+  if (mEl) mEl.textContent = '00';
+  renderStudyBlocks();
+  renderGenericList('studySessionList','studySessionList');
+  renderStudyTile();
+  saveDay();
+}
+
+// ── CALORIE DATABASE ──
+const CAL_DB = {
+  // Proteins
+  'chicken breast':165,'chicken thigh':209,'chicken wing':203,'chicken':165,
+  'beef':250,'steak':271,'mince':250,'ground beef':250,'pork':242,'lamb':294,
+  'salmon':208,'tuna':144,'fish':136,'prawn':99,'shrimp':99,'egg':155,'eggs':155,
+  'bacon':541,'ham':145,'salami':425,'pepperoni':494,'sausage':296,'hotdog':290,
+  'tofu':76,'tempeh':193,
+  // Carbs
+  'rice':130,'white rice':130,'brown rice':112,'fried rice':163,
+  'pasta':158,'spaghetti':158,'noodles':138,'ramen':436,
+  'bread':265,'toast':313,'white bread':265,'sourdough':289,
+  'potato':77,'chips':536,'fries':312,'mashed potato':113,'sweet potato':86,
+  'oats':389,'oatmeal':71,'cereal':379,'granola':471,
+  'pizza':266,'burger':295,'sandwich':250,'wrap':210,
+  'corn':86,'peas':81,'lentils':116,'chickpeas':164,'beans':127,
+  // Dairy
+  'milk':61,'cheese':402,'cheddar':403,'mozzarella':280,'feta':264,
+  'yoghurt':59,'yogurt':59,'greek yoghurt':59,'butter':717,'cream':345,
+  // Vegetables
+  'lettuce':15,'spinach':23,'broccoli':34,'carrot':41,'tomato':18,
+  'cucumber':15,'capsicum':31,'onion':40,'garlic':149,'mushroom':22,
+  'avocado':160,'zucchini':17,'celery':16,'cabbage':25,'kale':49,
+  // Fruits
+  'apple':52,'banana':89,'orange':47,'grape':69,'strawberry':32,
+  'blueberry':57,'mango':60,'watermelon':30,'pineapple':50,
+  // Snacks & sweets
+  'chocolate':546,'dark chocolate':598,'biscuit':451,'cookie':480,
+  'cake':347,'muffin':377,'donut':452,'croissant':406,'bagel':250,
+  'nuts':607,'almonds':579,'peanuts':567,'cashews':553,'walnuts':654,
+  'peanut butter':588,'hummus':166,'salsa':36,'guacamole':160,
+  'popcorn':375,'crackers':421,'rice cake':392,
+  // Drinks
+  'juice':45,'orange juice':45,'apple juice':46,'coke':42,'cola':42,
+  'coffee':2,'latte':120,'cappuccino':74,'smoothie':80,'milk tea':140,
+  'beer':43,'wine':83,'spirit':231,
+  // Condiments/sauces
+  'ketchup':112,'tomato sauce':97,'mayo':680,'mayonnaise':680,
+  'soy sauce':53,'olive oil':884,'oil':884,'dressing':450,
+  // Common meals
+  'stir fry':150,'curry':150,'soup':50,'salad':100,'bowl':200,
+};
+
+// Quantity multipliers
+const QTY_WORDS = {
+  'half':0.5,'quarter':0.25,'third':0.33,'double':2,'large':1.5,'small':0.6,'medium':1,
+};
+
+function estimateCal(text) {
+  if (!text) return null;
+  const lower = text.toLowerCase();
+
+  // Try to extract quantity
+  let qty = 1;
+  // "3 pieces", "2 slices", "1 cup", "500g", "100g"
+  const numMatch = lower.match(/^(\d+\.?\d*)\s*(x|pieces?|slices?|cups?|g|ml|serving|portion|handful|tbsp|tsp)?/);
+  if (numMatch) {
+    qty = parseFloat(numMatch[1]);
+    // gram-based: if unit is grams, divide cal/100 * grams
+  }
+  const halfMatch = lower.match(/(half|quarter|third|double|large|small|medium)/);
+  if (halfMatch) qty *= (QTY_WORDS[halfMatch[1]] || 1);
+
+  // Find best matching food
+  let bestMatch = null, bestScore = 0;
+  const words = lower.replace(/[^a-z\s]/g,'').split(/\s+/);
+
+  // Try multi-word matches first (e.g. "chicken breast")
+  for (const [food, cal] of Object.entries(CAL_DB)) {
+    const foodWords = food.split(' ');
+    const matched = foodWords.every(fw => words.some(w => w.includes(fw) || fw.includes(w)));
+    if (matched) {
+      const score = food.length; // longer match = better
+      if (score > bestScore) { bestScore = score; bestMatch = {food, cal}; }
+    }
+  }
+
+  if (!bestMatch) return null;
+
+  // Estimate based on quantity
+  // Default serving ~100g, adjust by qty
+  const baseCal = bestMatch.cal;
+  const servingCal = qty <= 1 ? Math.round(baseCal * 0.8) : Math.round(baseCal * 0.8 * qty / 1.5);
+  return servingCal;
+}
+
+
 
 // ── CLEANUP: remove phantom drafts ──
 (function cleanupBadDrafts() {
@@ -4326,12 +4651,12 @@ function pomoComplete() {
     _pomoState.sessions++;
     const mins = _pomoState.durMin;
     loadTodayDraft();
-    if (!draft.studyHrs) draft.studyHrs = {h:0, m:0, locked:false};
-    draft.studyHrs.m += mins;
-    draft.studyHrs.h += Math.floor(draft.studyHrs.m / 60);
-    draft.studyHrs.m = draft.studyHrs.m % 60;
+    if (!draft.studyBlocks) draft.studyBlocks = [];
+    draft.studyBlocks.push({h: Math.floor(mins/60), m: mins%60, addedAt: Date.now(), source: 'pomodoro'});
+    recalcStudyHrs();
     saveDay();
     renderStudyTile();
+    renderStudyBlocks();
     flash();
     if (_pomoState.autoBreak) {
       setTimeout(() => {
@@ -4481,13 +4806,12 @@ function swLogStudy() {
   if (total < 60000) { alert('Less than 1 minute — keep going!'); return; }
   const mins = Math.round(total / 60000);
   loadTodayDraft();
-  if (!draft.studyHrs) draft.studyHrs = {h:0, m:0, locked:false};
-  draft.studyHrs.m += mins;
-  draft.studyHrs.h += Math.floor(draft.studyHrs.m / 60);
-  draft.studyHrs.m = draft.studyHrs.m % 60;
-  draft.studyLastUpdated = Date.now();
+  if (!draft.studyBlocks) draft.studyBlocks = [];
+  draft.studyBlocks.push({h: Math.floor(mins/60), m: mins%60, addedAt: Date.now(), source: 'stopwatch'});
+  recalcStudyHrs();
   saveDay();
   renderStudyTile();
+  renderStudyBlocks();
   flash();
   // Reset stopwatch after logging
   swReset();
