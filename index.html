@@ -2002,7 +2002,19 @@ function collectFromUI() {
 function applyToUI() {
   document.getElementById('wakeTime').value = draft.wakeTime || '';
   document.getElementById('logOff').value   = draft.logOff   || '';
-  // Sleeptrack: show — if untouched
+  // Sleeptrack: if today's draft, only show touched state if it was set today
+  // Guard: if currentDate is today and sleeptrack.touched but no wakeTime/tasks, it's stale
+  if (dateKey(currentDate) === dateKey(today())) {
+    const looksStale = !draft.wakeTime && !draft.logOff &&
+      !(draft.tasks && draft.tasks.length) &&
+      !(draft.studyBlocks && draft.studyBlocks.length) &&
+      !(draft.moods && draft.moods.length);
+    if (looksStale && draft.sleeptrack && draft.sleeptrack.touched) {
+      draft.sleeptrack = {h:0, m:0, locked:false, touched:false};
+    }
+  }
+
+  // Sleeptrack display
   if (!draft.sleeptrack.touched) {
     const hEl = document.getElementById('sleeptrack_h');
     const mEl = document.getElementById('sleeptrack_m');
@@ -2663,11 +2675,41 @@ function renderStudyTile() {
 
 // ── STREAKS ──
 function computeStreaks() {
-  const t = today(); let ex=0, bk=0, st=0, lg=0;
-  for(let i=0;i<90;i++){const d=new Date(t);d.setDate(d.getDate()-i);if(!allLogs[dateKey(d)])break;lg++;}
-  for(let i=0;i<90;i++){const d=new Date(t);d.setDate(d.getDate()-i);const r=allLogs[dateKey(d)];if(!r||r.exercise!=='yes')break;ex++;}
-  for(let i=0;i<90;i++){const d=new Date(t);d.setDate(d.getDate()-i);const r=allLogs[dateKey(d)];if(!r||r.brekky!=='yes')break;bk++;}
-  for(let i=0;i<90;i++){const d=new Date(t);d.setDate(d.getDate()-i);const r=allLogs[dateKey(d)];if(!r||durToDecimal(r.studyHrs||{h:0,m:0})<=0)break;st++;}
+  const t = today();
+  // Start from yesterday — today doesn't count until you've logged it
+  // But if today has a log, add 1 on top
+  const todayKey = dateKey(t);
+  const todayHasLog = !!allLogs[todayKey];
+
+  let ex=0, bk=0, st=0, lg=0;
+
+  // Check from yesterday backwards
+  for(let i=1;i<=90;i++){
+    const d=new Date(t); d.setDate(d.getDate()-i);
+    if(!allLogs[dateKey(d)]) break; lg++;
+  }
+  for(let i=1;i<=90;i++){
+    const d=new Date(t); d.setDate(d.getDate()-i);
+    const r=allLogs[dateKey(d)]; if(!r||r.exercise!=='yes') break; ex++;
+  }
+  for(let i=1;i<=90;i++){
+    const d=new Date(t); d.setDate(d.getDate()-i);
+    const r=allLogs[dateKey(d)]; if(!r||r.brekky!=='yes') break; bk++;
+  }
+  for(let i=1;i<=90;i++){
+    const d=new Date(t); d.setDate(d.getDate()-i);
+    const r=allLogs[dateKey(d)]; if(!r||durToDecimal(r.studyHrs||{h:0,m:0})<=0) break; st++;
+  }
+
+  // Add today if it has content
+  if(todayHasLog) {
+    const td = allLogs[todayKey];
+    lg++;
+    if(td.exercise==='yes') ex++;
+    if(td.brekky==='yes') bk++;
+    if(durToDecimal(td.studyHrs||{h:0,m:0})>0) st++;
+  }
+
   return {ex, bk, st, lg};
 }
 function durToDecimal(d) { if(!d||typeof d!=='object')return 0; return Math.round((d.h+d.m/60)*100)/100; }
